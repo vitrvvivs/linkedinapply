@@ -197,7 +197,7 @@ if __name__ == '__main__':
         )
     parser.add_argument(
             '--store-no',
-            help='store jobid of refused jobs'
+            help='store jobid of refused jobs',
             action='store_true'
         )
     args = parser.parse_args()
@@ -209,8 +209,7 @@ if __name__ == '__main__':
     atexit.register(resume_file.close)
     atexit.register(record_file.close)
     blacklist = args.blacklist.split(',')
-    if args.yes:
-
+        
     apply_methods = {
             'InApply': InApply
         }
