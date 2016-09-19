@@ -80,7 +80,8 @@ def buildjoblist(keywords, location, record_file=None, blacklist=[]):
     jobs_url = JOBS_URL.format(keywords, location)
     jobs = []
     if record_file:
-        formerly_applied = {int(x): True for x in record_file.read().split('\n') if x}
+        record_file.seek(0)
+        formerly_applied = {int(x): True for x in record_file.read().strip().split('\n') if x}
 
     start = 0
     count = JOBS_COUNT
@@ -171,6 +172,11 @@ if __name__ == '__main__':
             '--password',
         )
     parser.add_argument(
+            '--blacklist',
+            help='comma-seperated string of blacklisted companies',
+            default=''
+        )
+    parser.add_argument(
             '--keywords',
             help='Keywords to search',
             required=True,
@@ -192,32 +198,24 @@ if __name__ == '__main__':
     record_file = open(path.dirname(path.realpath(__file__))+'/applied.txt', 'a+')
     atexit.register(resume_file.close)
     atexit.register(record_file.close)
-    methods = {
-            None: lambda job, resume_file, record_file: None,
-            'InApply': InApply,
+    blacklist = args.blacklist.split(',')
+
+    apply_methods = {
+            'InApply': InApply
         }
 
     login()
-    """
     jobs = buildjoblist(
             args.keywords,
             args.location,
             record_file=record_file,
-            blacklist=('CyberCoders')
+            blacklist=blacklist
         )
-    """
-    jobs = [{
-            'id': 131074920, 
-            'method': 'InApply',
-            'title': 'title',
-            'company': 'company',
-            'description': 'description'
-        }]
     for job in jobs:
-        print()
+        method = apply_methods.get(job['method'])
+        if not method: continue
         for k in ('title', 'company', 'description'):
             print(k, ':', job[k])
-        if (input('apply? ') or 'yes')[0] == 'n':
-            continue
-        application = methods.get(job['method'])(job, resume_file, record_file)
-        print(application.status_code)
+        if (input('apply? ') or 'yes')[0] != 'n':
+            application = method(job, resume_file, record_file)
+            print(application.status_code)
