@@ -81,7 +81,7 @@ def buildjoblist(keywords, location, record_file=None, blacklist=[]):
     jobs = []
     if record_file:
         record_file.seek(0)
-        formerly_applied = {int(x): True for x in record_file.read().strip().split('\n') if x}
+        formerly_applied = {int(x): True for x in record_file.read().split('\n') if x}
 
     start = 0
     count = JOBS_COUNT
@@ -172,11 +172,6 @@ if __name__ == '__main__':
             '--password',
         )
     parser.add_argument(
-            '--blacklist',
-            help='comma-seperated string of blacklisted companies',
-            default=''
-        )
-    parser.add_argument(
             '--keywords',
             help='Keywords to search',
             required=True,
@@ -190,6 +185,21 @@ if __name__ == '__main__':
             'resume',
             help='location of resume file',
         )
+    parser.add_argument(
+            '--blacklist',
+            help='comma-seperated string of blacklisted companies',
+            default=''
+        )
+    parser.add_argument(
+            '--yes',
+            help='Dont\'t ask for confirmation before appyling',
+            action='store_true'
+        )
+    parser.add_argument(
+            '--store-no',
+            help='store jobid of refused jobs'
+            action='store_true'
+        )
     args = parser.parse_args()
 
     if args.email: login_payload['session_key'] = args.email
@@ -199,6 +209,7 @@ if __name__ == '__main__':
     atexit.register(resume_file.close)
     atexit.register(record_file.close)
     blacklist = args.blacklist.split(',')
+    if args.yes:
 
     apply_methods = {
             'InApply': InApply
@@ -216,6 +227,8 @@ if __name__ == '__main__':
         if not method: continue
         for k in ('title', 'company', 'description'):
             print(k, ':', job[k])
-        if (input('apply? ') or 'yes')[0] != 'n':
+        if args.yes or ((input('apply? ') or 'yes')[0] != 'n'):
             application = method(job, resume_file, record_file)
             print(application.status_code)
+        elif args.store_yes:
+            record_file.write(str(job['id'])+'\n')
