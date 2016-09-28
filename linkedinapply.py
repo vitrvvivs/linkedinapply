@@ -156,17 +156,48 @@ def InApply(job, resume_file, record_file=None): # `job` has 'id', resume_file i
                 })
         )
     # record job id, so that it's skipped next time
-    record_file.write(str(job['id'])+'\n')
     return application
 
 # TODO add more sourceDomain handlers
+apply_methods = {
+        'InApply': InApply
+    }
+
+def main(resume, username='', password='', keywords='', location='', blacklist='', yes_to_all=False, store_no=False):
+    if username: login_payload['session_key'] = username
+    if password: login_payload['session_password'] = password
+    resume_file = open(resume, 'rb')
+    record_file = open(path.dirname(path.realpath(__file__))+'/applied.txt', 'a+')
+    atexit.register(resume_file.close)
+    atexit.register(record_file.close)
+
+    login()
+    jobs = buildjoblist(
+            keywords,
+            location,
+            record_file=record_file,
+            blacklist=blacklist
+        )
+    print(len([x for x in jobs if apply_methods.get(x['method'])]))
+    exit(0)
+    for job in jobs:
+        method = apply_methods.get(job['method'])
+        if not method: continue
+        for k in ('title', 'company', 'description'):
+            print(k, ':', job[k])
+        if yes_to_all or ((input('apply? ') or 'yes')[0] != 'n'):
+            application = method(job, resume_file, record_file)
+            print(application.status_code)
+        elif store_yes:
+            record_file.write(str(job['id'])+'\n')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Mass apply to job postings on LinkedIn")
 
     ## handle command line flags
     parser.add_argument(
-            '--email',
+            '--username',
+            help='LinkedIn username (email address)'
         )
     parser.add_argument(
             '--password',
@@ -191,7 +222,7 @@ if __name__ == '__main__':
             default=''
         )
     parser.add_argument(
-            '--yes',
+            '--yes-to-all',
             help='Dont\'t ask for confirmation before appyling',
             action='store_true'
         )
@@ -201,33 +232,6 @@ if __name__ == '__main__':
             action='store_true'
         )
     args = parser.parse_args()
+    args.blacklist=[x.strip() for x in args.blacklist.split(',')]
 
-    if args.email: login_payload['session_key'] = args.email
-    if args.password: login_payload['session_password'] = args.password
-    resume_file = open(args.resume, 'rb')
-    record_file = open(path.dirname(path.realpath(__file__))+'/applied.txt', 'a+')
-    atexit.register(resume_file.close)
-    atexit.register(record_file.close)
-    blacklist = args.blacklist.split(',')
-        
-    apply_methods = {
-            'InApply': InApply
-        }
-
-    login()
-    jobs = buildjoblist(
-            args.keywords,
-            args.location,
-            record_file=record_file,
-            blacklist=blacklist
-        )
-    for job in jobs:
-        method = apply_methods.get(job['method'])
-        if not method: continue
-        for k in ('title', 'company', 'description'):
-            print(k, ':', job[k])
-        if args.yes or ((input('apply? ') or 'yes')[0] != 'n'):
-            application = method(job, resume_file, record_file)
-            print(application.status_code)
-        elif args.store_yes:
-            record_file.write(str(job['id'])+'\n')
+    main(**vars(args))
