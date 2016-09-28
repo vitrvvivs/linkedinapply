@@ -109,44 +109,48 @@ def buildjoblist(keywords, location, record_file=None, blacklist=[]):
 
 ## Apply using LinkedIn's builtin
 #  returns a Requests response object
-def InApply(job, resume_file, record_file=None): # `job` has 'id', resume_file is file object
+def InApply(job, resume_file): # `job` has 'id', resume_file is file object or False
     job_data = session.get("https://www.linkedin.com/jobs/view/applyFlow/{}".format(job['id'])).json() #json of application information
+    payload = apply_payload
     # upload resume
-    resume = session.post(
-            RESUME_URL_POST,
-            data={
-                    'upload_info': job_data['applicant']['resumeUploadLink'],
-                    'store_securely': 'true',
-                    'sign_response': 'true',
-                    'persist': 'true'
-                },
-            headers=dict(headers, **{
-                    'X-IsAJAXForm': '1',
-                    'X-Requested-With': 'XMLHttpRequest',
-                }),
-            files={'file': (
-                    'resume.pdf',
-                    resume_file,
-                    'application/pdf',
-                    {'Expires': '0'}
-                )}
-        )
-    # TODO allow for not-pdf resumes
-    # get return data from resume upload; it's a json object inside a javascript call
-    resume_json = html.fromstring(resume.text).xpath('//script/text()')[0]
-    resume_json = json.loads(re.search('{}(.*){}'.format('parent.mediaCallback\(', '\)'), resume_json).group(1))
+    if resume_file:
+        resume = session.post(
+                RESUME_URL_POST,
+                data={
+                        'upload_info': job_data['applicant']['resumeUploadLink'],
+                        'store_securely': 'true',
+                        'sign_response': 'true',
+                        'persist': 'true'
+                    },
+                headers=dict(headers, **{
+                        'X-IsAJAXForm': '1',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    }),
+                files={'file': (
+                        'resume.pdf',
+                        resume_file,
+                        'application/pdf',
+                        {'Expires': '0'}
+                    )}
+            )
+        # TODO allow for not-pdf resumes
+        # get return data from resume upload; it's a json object inside a javascript call
+        resume_json = html.fromstring(resume.text).xpath('//script/text()')[0]
+        resume_json = json.loads(re.search('{}(.*){}'.format('parent.mediaCallback\(', '\)'), resume_json).group(1))
+        payload = dict(payload, **{
+                'resumeMediaId': resume_json['value'],
+                'resumeName': resume_json['filename'],
+                'resumeMupldSignature': resume_json['sig']
+            })
 
     # send application
     application = session.post(
             APPLY_URL_POST,
-            data=dict(apply_payload, **{
+            data=dict(payload, **{
                     'csrfToken': session.cookies['JSESSIONID'].replace('"', ''),
                     'jobId': job['id'],
                     'email': job_data['applicant']['email'][0]['email'],
                     'phone': job_data['applicant']['phone'],
-                    'resumeMediaId': resume_json['value'],
-                    'resumeName': resume_json['filename'],
-                    'resumeMupldSignature': resume_json['sig'],
                     'upload_info': job_data['applicant']['resumeUploadLink'],
                     'upload_info_with_js': job_data['applicant']['resumeUploadLink'],
                 }),
@@ -163,13 +167,16 @@ apply_methods = {
         'InApply': InApply
     }
 
-def main(resume, username='', password='', keywords='', location='', blacklist='', yes_to_all=False, store_no=False):
+def main(resume=None, username='', password='', keywords='', location='', blacklist='', yes_to_all=False, store_no=False):
     if username: login_payload['session_key'] = username
     if password: login_payload['session_password'] = password
-    resume_file = open(resume, 'rb')
     record_file = open(path.dirname(path.realpath(__file__))+'/applied.txt', 'a+')
-    atexit.register(resume_file.close)
     atexit.register(record_file.close)
+    if resume:
+        resume_file = open(resume, 'rb')
+        atexit.register(resume_file.close)
+    else:
+        resume_file = False
 
     login()
     jobs = buildjoblist(
@@ -178,17 +185,17 @@ def main(resume, username='', password='', keywords='', location='', blacklist='
             record_file=record_file,
             blacklist=blacklist
         )
-    print(len([x for x in jobs if apply_methods.get(x['method'])]))
-    exit(0)
     for job in jobs:
         method = apply_methods.get(job['method'])
         if not method: continue
         for k in ('title', 'company', 'description'):
             print(k, ':', job[k])
         if yes_to_all or ((input('apply? ') or 'yes')[0] != 'n'):
-            application = method(job, resume_file, record_file)
+            application = method(job, resume_file)
             print(application.status_code)
-        elif store_yes:
+            record_file.write(str(job['id'])+'\n')
+            return
+        elif store_no:
             record_file.write(str(job['id'])+'\n')
 
 if __name__ == '__main__':
@@ -213,7 +220,7 @@ if __name__ == '__main__':
             required=True,
         )
     parser.add_argument(
-            'resume',
+            '--resume',
             help='location of resume file',
         )
     parser.add_argument(
