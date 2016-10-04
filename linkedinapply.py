@@ -46,10 +46,12 @@ apply_payload = {   # unchanged, but necessary
                     'resumeName': '',#resume.pdf
                     'resumeMupldSignature': ''#token
                 }
+apply_methods = {
+                }
 session = requests.session()
 
 ## connect and login
-def login():
+def login(username='', password=''):
     #  get login page
     login_page = session.get(LOGIN_URL)
     login_page = html.fromstring(login_page.text)
@@ -57,13 +59,14 @@ def login():
         value = login_page.xpath("//input[@name='{}']/@value".format(token))
         login_payload[token] = value[0]
     #  get email and password if not in argv
-    if not login_payload['session_key']:
-        login_payload['session_key'] = input('Email: ')
-    if not login_payload['session_password']:
-        login_payload['session_key'] = getpass('Password: ')
+    if not username: username = input('Email: ')
+    if not password: password = getpass('Password: ')
     login_attempt = session.post(
             LOGIN_URL_POST,
-            data=login_payload,
+            data=dict(login_payload, **{
+                    'session_key': username,
+                    'session_password': password
+                }),
             headers=dict(headers, **{
                     'referer': LOGIN_URL,
                     'X-IsAJAXForm': '1',
@@ -84,9 +87,8 @@ def buildjoblist(keywords, location, record_file=None, blacklist=[]):
         formerly_applied = {int(x): True for x in record_file.read().split('\n') if x}
 
     start = 0
-    count = JOBS_COUNT
-    lim = count + 1
-    while start + count < lim:
+    lim = JOBS_COUNT + 1
+    while start + JOBS_COUNT < lim:
         jobs_json = session.get(jobs_url.format(start))
         jobs_json = json.loads(jobs_json.text)['decoratedJobPostingsModule']
         lim = jobs_json['paging']['total']
@@ -104,7 +106,7 @@ def buildjoblist(keywords, location, record_file=None, blacklist=[]):
             if (record_file and formerly_applied.get(job['id'])) or job['company'] in blacklist:
                 continue
             jobs.append(job)
-        start += count
+        start += JOBS_COUNT
     return jobs
 
 ## Apply using LinkedIn's builtin
@@ -161,15 +163,11 @@ def InApply(job, resume_file): # `job` has 'id', resume_file is file object or F
         )
     # record job id, so that it's skipped next time
     return application
+apply_methods['InApply'] = InApply
 
 # TODO add more sourceDomain handlers
-apply_methods = {
-        'InApply': InApply
-    }
 
-def main(resume=None, username='', password='', keywords='', location='', blacklist='', yes_to_all=False, store_no=False):
-    if username: login_payload['session_key'] = username
-    if password: login_payload['session_password'] = password
+def main(resume=None, username='', password='', keywords='', location='', blacklist='', yes_to_all=False, store_no=False, count=False):
     record_file = open(path.dirname(path.realpath(__file__))+'/applied.txt', 'a+')
     atexit.register(record_file.close)
     if resume:
@@ -178,13 +176,16 @@ def main(resume=None, username='', password='', keywords='', location='', blackl
     else:
         resume_file = False
 
-    login()
+    login(username, password)
     jobs = buildjoblist(
             keywords,
             location,
             record_file=record_file,
             blacklist=blacklist
         )
+    if count: #returns number of jobs the script know how to apply to
+        print(len([x for x in jobs if apply_methods.get(x['method'])]))
+        return
     for job in jobs:
         method = apply_methods.get(job['method'])
         if not method: continue
@@ -194,7 +195,6 @@ def main(resume=None, username='', password='', keywords='', location='', blackl
             application = method(job, resume_file)
             print(application.status_code)
             record_file.write(str(job['id'])+'\n')
-            return
         elif store_no:
             record_file.write(str(job['id'])+'\n')
 
@@ -236,6 +236,11 @@ if __name__ == '__main__':
     parser.add_argument(
             '--store-no',
             help='store jobid of refused jobs',
+            action='store_true'
+        )
+    parser.add_argument(
+            '--count',
+            help='Print number of jobs',
             action='store_true'
         )
     args = parser.parse_args()
