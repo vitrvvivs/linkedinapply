@@ -15,6 +15,7 @@ JOBS_COUNT =        50
 JOBS_URL =          ROOT_URL + "/jobs/searchRefresh?keywords={}&location={}&start={{}}&count=" + str(JOBS_COUNT)
 APPLY_URL_POST =    ROOT_URL + "/jobs/submitJobApplication"
 RESUME_URL_POST =   ROOT_URL + "/mupld/cappts"
+EXPERIENCE_LEVELS = ['not applicable', 'internship', 'entry', 'associate', 'mid-senior', 'director', 'executive']
 
 # Mutable globals
 headers =       {
@@ -79,12 +80,14 @@ def login(username='', password=''):
 ## Build a list of jobs
 #  ignore jobs already applied to
 #  ignore companies on blacklist
-def buildjoblist(keywords, location, record_file=None, blacklist=[]):
+def buildjoblist(keywords, location, experience=[], record_file=None, blacklist=[]):
     jobs_url = JOBS_URL.format(keywords, location)
     jobs = []
     if record_file:
         record_file.seek(0)
         formerly_applied = {int(x): True for x in record_file.read().split('\n') if x}
+    if experience:
+        jobs_url += '&f_E=' + '%2C'.join([str(EXPERIENCE_LEVELS.index(x)) for x in experience])
 
     start = 0
     lim = JOBS_COUNT + 1
@@ -167,7 +170,7 @@ apply_methods['InApply'] = InApply
 
 # TODO add more sourceDomain handlers
 
-def main(resume=None, username='', password='', keywords='', location='', blacklist='', yes_to_all=False, store_no=False, count=False):
+def main(resume=None, username='', password='', keywords='', location='', blacklist='', experience='', yes_to_all=False, store_no=False, count=False):
     record_file = open(path.dirname(path.realpath(__file__))+'/applied.txt', 'a+')
     atexit.register(record_file.close)
     if resume:
@@ -180,6 +183,7 @@ def main(resume=None, username='', password='', keywords='', location='', blackl
     jobs = buildjoblist(
             keywords,
             location,
+            experience=experience,
             record_file=record_file,
             blacklist=blacklist
         )
@@ -227,6 +231,12 @@ if __name__ == '__main__':
             '--blacklist',
             help='comma-seperated string of blacklisted companies',
             default=''
+        )
+    parser.add_argument(
+            '--experience',
+            help='experience level to search',
+            choices=EXPERIENCE_LEVELS,
+            action='append'
         )
     parser.add_argument(
             '--yes-to-all',
