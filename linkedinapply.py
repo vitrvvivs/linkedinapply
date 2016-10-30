@@ -80,7 +80,7 @@ def login(username='', password=''):
 ## Build a list of jobs
 #  ignore jobs already applied to
 #  ignore companies on blacklist
-def buildjoblist(keywords, location, experience=[], record_file=None, blacklist=[]):
+def joblist(keywords, location, experience=[], record_file=None, blacklist=[]):
     jobs_url = JOBS_URL.format(keywords, location)
     jobs = []
     if record_file:
@@ -108,9 +108,8 @@ def buildjoblist(keywords, location, experience=[], record_file=None, blacklist=
             # 'job' doesn't look like a real word anymore
             if (record_file and formerly_applied.get(job['id'])) or job['company'] in blacklist:
                 continue
-            jobs.append(job)
+            yield job
         start += JOBS_COUNT
-    return jobs
 
 ## Apply using LinkedIn's builtin
 #  returns a Requests response object
@@ -180,7 +179,7 @@ def main(resume=None, username='', password='', keywords='', location='', blackl
         resume_file = False
 
     login(username, password)
-    jobs = buildjoblist(
+    jobs = joblist(
             keywords,
             location,
             experience=experience,
