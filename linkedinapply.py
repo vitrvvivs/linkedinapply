@@ -118,6 +118,7 @@ def InApply(job, resume_file): # `job` has 'id', resume_file is file object or F
     payload = apply_payload
     # upload resume
     if resume_file:
+        resume_file.seek(0) # each application sent reads the file; if we send it more than once, we need to reset the file to the beginning
         resume = session.post(
                 RESUME_URL_POST,
                 data={
