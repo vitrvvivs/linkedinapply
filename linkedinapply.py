@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import requests, argparse, atexit, json, re
+import webbrowser
+from urllib.parse import unquote
+from html2text import html2text
 from binascii import b2a_base64
 from getpass import getpass
 from lxml import html
@@ -51,6 +54,14 @@ apply_methods = {
                 }
 session = requests.session()
 
+## convenience methods
+def clip_string(source, start, end):
+    return re.search('{}(.*){}'.format(start, end), source).group(1)
+def get_job_description_module(job_url):
+    # job description is in a json object inside a comment inside a code tag,
+    # when getting the page (instead of calling the API)
+    return json.loads(str(html.fromstring(session.get(job_url).text).xpath("//code[@id='decoratedJobPostingModule']/comment()")[0]).lstrip("<!--").rstrip("-->"))["decoratedJobPosting"]
+
 ## connect and login
 def login(username='', password=''):
     #  get login page
@@ -78,14 +89,10 @@ def login(username='', password=''):
         exit(1)
 
 ## Build a list of jobs
-#  ignore jobs already applied to
-#  ignore companies on blacklist
+# returns a generator
 def joblist(keywords, location, experience=[], record_file=None, blacklist=[]):
     jobs_url = JOBS_URL.format(keywords, location)
     jobs = []
-    if record_file:
-        record_file.seek(0)
-        formerly_applied = {int(x): True for x in record_file.read().split('\n') if x}
     if experience:
         jobs_url += '&f_E=' + '%2C'.join([str(EXPERIENCE_LEVELS.index(x)) for x in experience])
 
@@ -97,17 +104,17 @@ def joblist(keywords, location, experience=[], record_file=None, blacklist=[]):
         lim = jobs_json['paging']['total']
         for job in jobs_json['elements']:
             inapply = job['isInApply']
+            url = job['viewJobTextUrl']
             job = job['decoratedJobPosting']
             job = {
                     'id': job['jobPosting']['id'],
+                    'url': url,
                     'method': 'InApply' if inapply else job['jobPosting'].get('sourceDomain'),
                     'title': job['jobPosting']['title'],
                     'company': job['companyName'],
                     'description': job['formattedDescription']
                 }
             # 'job' doesn't look like a real word anymore
-            if (record_file and formerly_applied.get(job['id'])) or job['company'] in blacklist:
-                continue
             yield job
         start += JOBS_COUNT
 
@@ -141,7 +148,7 @@ def InApply(job, resume_file): # `job` has 'id', resume_file is file object or F
         # TODO allow for not-pdf resumes
         # get return data from resume upload; it's a json object inside a javascript call
         resume_json = html.fromstring(resume.text).xpath('//script/text()')[0]
-        resume_json = json.loads(re.search('{}(.*){}'.format('parent.mediaCallback\(', '\)'), resume_json).group(1))
+        resume_json = json.loads(clip_string(resume_json, 'parent.mediaCallback\(', '\)'))
         payload = dict(payload, **{
                 'resumeMediaId': resume_json['value'],
                 'resumeName': resume_json['filename'],
@@ -166,9 +173,19 @@ def InApply(job, resume_file): # `job` has 'id', resume_file is file object or F
         )
     # record job id, so that it's skipped next time
     return application
-apply_methods['InApply'] = InApply
+def InOffsiteOpen(job, resume_file):
+    offsite_url = get_job_description_module(job['url'])["externalApplyLink"]
+    offsite_url = clip_string(offsite_url, "url=", "&")
+    offsite_url = unquote(offsite_url)
 
-# TODO add more sourceDomain handlers
+    print("opening", offsite_url, "in browser.\n")
+    webbrowser.open(offsite_url)
+
+apply_methods['InApply'] = InApply
+apply_methods['offsite'] = InOffsiteOpen
+# TODO add more apply_methods
+
+
 
 def main(resume=None, username='', password='', keywords='', location='', blacklist='', experience='', yes_to_all=False, store_no=False, count=False):
     record_file = open(path.dirname(path.realpath(__file__))+'/applied.txt', 'a+')
@@ -187,20 +204,33 @@ def main(resume=None, username='', password='', keywords='', location='', blackl
             record_file=record_file,
             blacklist=blacklist
         )
-    if count: #returns number of jobs the script know how to apply to
-        print(len([x for x in jobs if apply_methods.get(x['method'])]))
+
+    record_file.seek(0)
+    formerly_applied = {int(x): True for x in record_file.read().split('\n') if x}
+    if count: # returns number of jobs per provider
+        from collections import Counter
+        print(Counter([job['method'] for job in jobs]).most_common())
         return
     for job in jobs:
-        method = apply_methods.get(job['method'])
-        if not method: continue
-        for k in ('title', 'company', 'description'):
+        method = apply_methods.get(job['method']) or apply_methods['offsite']
+
+        if formerly_applied.get(job['id']) or job['company'] in blacklist:
+            continue
+        for k in ('title', 'company', 'method', 'description'):
             print(k, ':', job[k])
-        if yes_to_all or ((input('apply? ') or 'yes')[0] != 'n'):
-            application = method(job, resume_file)
-            print(application.status_code)
-            record_file.write(str(job['id'])+'\n')
-        elif store_no:
-            record_file.write(str(job['id'])+'\n')
+
+        while True:
+            choice = input('apply? ') or 'yes'
+            if choice[0] == 'm':
+                description = get_job_description_module(job['url'])['jobPosting']['description']['rawText']
+                print(description)
+            elif (yes_to_all and job['method'] in apply_methods) or (choice[0] == 'y'):
+                application = method(job, resume_file)
+                record_file.write(str(job['id'])+'\n')
+                break
+            elif choice[0] == 'n' and store_no:
+                record_file.write(str(job['id'])+'\n')
+                break
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Mass apply to job postings on LinkedIn")
@@ -253,7 +283,7 @@ if __name__ == '__main__':
             help='Print number of jobs',
             action='store_true'
         )
+
     args = parser.parse_args()
     args.blacklist=[x.strip() for x in args.blacklist.split(',')]
-
     main(**vars(args))
